@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# 运行时数据（数据库、上传文件）
+data/
+
+# 环境变量
+.env
+
+# 构建产物
+*.egg-info/
+.pytest_cache/
