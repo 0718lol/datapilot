@@ -9,7 +9,7 @@ from .db import Base, SessionLocal, engine
 from .engine.duckdb_manager import duck_manager
 from .models import DataSource, User
 from .auth import hash_password
-from .routers import auth, conversations, datasources, evals, settings as settings_router
+from .routers import auth, conversations, dashboards, datasources, evals, settings as settings_router
 
 
 def create_app() -> FastAPI:
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(datasources.router)
     app.include_router(conversations.router)
+    app.include_router(dashboards.router)
     app.include_router(evals.router)
     app.include_router(settings_router.router)
 

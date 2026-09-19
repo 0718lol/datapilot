@@ -21,9 +21,9 @@ from ..auth import get_current_user
 from ..db import get_db
 from ..engine.connectors import connector_for_datasource
 from ..engine.duckdb_manager import QueryError
-from ..models import DataSource, EvalItem, User
+from ..models import EvalItem, User
 from ..schemas import EvalItemCreate, EvalRunRequest
-from .datasources import get_datasource_or_404
+from .datasources import ds_to_ctx as _ds_ctx, get_datasource_or_404
 
 router = APIRouter(prefix="/api/evals", tags=["evals"])
 
@@ -152,13 +152,3 @@ def _results_equal(
         return tuple(out)
 
     return sorted(map(norm, rows_a)) == sorted(map(norm, rows_b))
-
-
-def _ds_ctx(ds: DataSource) -> dict[str, Any]:
-    return {
-        "id": ds.id,
-        "name": ds.name,
-        "kind": ds.kind,
-        "connection_json": ds.connection_json,
-        "schema_json": ds.schema_json,
-    }

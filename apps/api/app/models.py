@@ -59,6 +59,22 @@ class EvalItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class DashboardItem(Base):
+    """仪表盘卡片：保存 SQL + 图表配置（非数据快照），打开时重新执行取最新数据。"""
+
+    __tablename__ = "dashboard_items"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=gen_id)
+    title: Mapped[str] = mapped_column(String(128))
+    datasource_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("datasources.id", ondelete="CASCADE"), index=True
+    )
+    sql: Mapped[str] = mapped_column(Text)
+    chart_hint: Mapped[str] = mapped_column(String(16), default="bar")
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 

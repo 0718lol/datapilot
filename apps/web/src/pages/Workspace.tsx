@@ -102,6 +102,17 @@ export default function Workspace() {
     },
   });
 
+  const saveChart = useMutation({
+    mutationFn: (p: { title: string; sql: string; chart_hint: string }) =>
+      api.post("/dashboards", { datasource_id: activeDsId, ...p }),
+    onSuccess: () => {
+      setNotice("已保存到仪表盘，可在左侧导航「仪表盘」查看");
+      queryClient.invalidateQueries({ queryKey: ["dashboards"] });
+    },
+    onError: (e) =>
+      setNotice(e instanceof Error ? `保存失败：${e.message}` : "保存失败"),
+  });
+
   const streaming = streamView !== null;
   const hasMessages = messages.length > 0 || streaming;
 
@@ -335,7 +346,12 @@ export default function Workspace() {
                     </div>
                   </div>
                 ) : (
-                  <AssistantCard key={m.id} view={viewFromContent(m.content)} />
+                  <AssistantCard
+                    key={m.id}
+                    view={viewFromContent(m.content)}
+                    onSaveChart={saveChart.mutate}
+                    savePending={saveChart.isPending}
+                  />
                 )
               )}
               {streamView && <AssistantCard view={streamView} />}

@@ -74,3 +74,20 @@ class EvalItemCreate(BaseModel):
 
 class EvalRunRequest(BaseModel):
     datasource_id: str
+
+
+class DashboardSaveRequest(BaseModel):
+    datasource_id: str
+    title: str = Field(min_length=1, max_length=100)
+    sql: str = Field(min_length=1)
+    chart_hint: str = "bar"
+
+
+class DashboardItemOut(BaseModel):
+    id: str
+    title: str
+    datasource_id: str
+    datasource_name: str
+    sql: str
+    chart_hint: str
+    created_at: str

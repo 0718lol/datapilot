@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import * as echarts from "echarts";
 import { AnimatePresence, motion } from "framer-motion";
-import { BarChart3, Download, LineChart, Maximize2, Table2, X } from "lucide-react";
+import {
+  BarChart3,
+  BookmarkPlus,
+  Download,
+  LineChart,
+  Maximize2,
+  Table2,
+  X,
+} from "lucide-react";
 import { buildChartOption } from "../../lib/echarts";
 import { useUIStore } from "../../store/auth";
 import type { ChartSpec } from "../../api/types";
@@ -12,7 +20,19 @@ const KIND_META: Record<ChartSpec["kind"], { label: string }> = {
   table: { label: "数据表" },
 };
 
-export function ChartCard({ spec, fullscreen = false }: { spec: ChartSpec; fullscreen?: boolean }) {
+export function ChartCard({
+  spec,
+  fullscreen = false,
+  title,
+  onSave,
+  saving = false,
+}: {
+  spec: ChartSpec;
+  fullscreen?: boolean;
+  title?: string;
+  onSave?: () => void;
+  saving?: boolean;
+}) {
   const theme = useUIStore((s) => s.theme);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);
@@ -54,12 +74,17 @@ export function ChartCard({ spec, fullscreen = false }: { spec: ChartSpec; fulls
         {!fullscreen && (
           <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-2 text-xs font-medium text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
             {spec.kind === "line" ? (
-              <LineChart className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+              <LineChart className="h-3.5 w-3.5 shrink-0 text-teal-600 dark:text-teal-400" />
             ) : (
-              <BarChart3 className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+              <BarChart3 className="h-3.5 w-3.5 shrink-0 text-teal-600 dark:text-teal-400" />
             )}
-            {Meta.label}
-            <span className="ml-auto flex items-center gap-1">
+            <span className="min-w-0 flex-1 truncate">{title ?? Meta.label}</span>
+            <span className="flex shrink-0 items-center gap-1">
+              {onSave && (
+                <IconButton title="保存到仪表盘" onClick={onSave} disabled={saving}>
+                  <BookmarkPlus className="h-3.5 w-3.5" />
+                </IconButton>
+              )}
               <IconButton title="下载 PNG" onClick={exportPng}>
                 <Download className="h-3.5 w-3.5" />
               </IconButton>
@@ -116,16 +141,19 @@ function IconButton({
   children,
   onClick,
   title,
+  disabled,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   title?: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       title={title}
       onClick={onClick}
-      className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+      disabled={disabled}
+      className="rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-40 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
     >
       {children}
     </button>

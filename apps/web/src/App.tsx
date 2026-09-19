@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Shell from "./pages/Shell";
 import Workspace from "./pages/Workspace";
 import DataSources from "./pages/DataSources";
+import Dashboards from "./pages/Dashboards";
 import Settings from "./pages/Settings";
 import Evals from "./pages/Evals";
 
@@ -21,6 +22,7 @@ export default function App() {
       <Route path="/login" element={token ? <Navigate to="/" replace /> : <Login />} />
       <Route element={token ? <Shell /> : <Navigate to="/login" replace />}>
         <Route path="/" element={<Workspace />} />
+        <Route path="/dashboards" element={<Dashboards />} />
         <Route path="/datasources" element={<DataSources />} />
         <Route path="/evals" element={<Evals />} />
         <Route path="/settings" element={<Settings />} />

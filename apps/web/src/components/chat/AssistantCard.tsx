@@ -7,7 +7,15 @@ import { ResultTable } from "./ResultTable";
 import type { AnswerView } from "./view";
 
 /** 一次回答的完整卡片：状态步骤 → 解读 → SQL → 图表 → 结果表。 */
-export function AssistantCard({ view }: { view: AnswerView }) {
+export function AssistantCard({
+  view,
+  onSaveChart,
+  savePending = false,
+}: {
+  view: AnswerView;
+  onSaveChart?: (payload: { title: string; sql: string; chart_hint: string }) => void;
+  savePending?: boolean;
+}) {
   const finished = !view.error && view.stages.visualize === "done";
 
   return (
@@ -39,7 +47,23 @@ export function AssistantCard({ view }: { view: AnswerView }) {
               </p>
             )}
             {view.sql && <SqlBlock sql={view.sql} />}
-            {view.chartSpec && view.chartSpec.kind !== "table" && <ChartCard spec={view.chartSpec} />}
+            {view.chartSpec && view.chartSpec.kind !== "table" && (
+              <ChartCard
+                spec={view.chartSpec}
+                title={view.question}
+                onSave={
+                  onSaveChart && view.sql
+                    ? () =>
+                        onSaveChart({
+                          title: view.question || "未命名图表",
+                          sql: view.sql!,
+                          chart_hint: view.chartSpec!.kind,
+                        })
+                    : undefined
+                }
+                saving={savePending}
+              />
+            )}
             {view.rows && view.rows.length > 0 && (
               <ResultTable columns={view.columns ?? []} rows={view.rows} rowCount={view.rowCount} />
             )}

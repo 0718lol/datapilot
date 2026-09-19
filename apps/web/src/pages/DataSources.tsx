@@ -10,7 +10,7 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { api } from "../api/client";
-import type { DataSource, DatabaseConnectForm } from "../api/types";
+import type { DataSource, DatabaseConnectForm, TablePreview } from "../api/types";
 import { Badge, Button, Input } from "../components/ui";
 import { clsx } from "../components/clsx";
 
@@ -33,8 +33,25 @@ export default function DataSources() {
   const [mode, setMode] = useState<Mode>("csv");
   const [dragOver, setDragOver] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [previews, setPreviews] = useState<
+    Record<string, { loading: boolean; error?: string; data?: TablePreview }>
+  >({});
   const [form, setForm] = useState<DatabaseConnectForm>(EMPTY_FORM);
   const [testResult, setTestResult] = useState<string | null>(null);
+
+  const loadPreview = (dsId: string, tableName: string) => {
+    const key = `${dsId}:${tableName}`;
+    setPreviews((p) => ({ ...p, [key]: { loading: true } }));
+    api
+      .get<TablePreview>(`/datasources/${dsId}/preview?table=${encodeURIComponent(tableName)}`)
+      .then((data) => setPreviews((p) => ({ ...p, [key]: { loading: false, data } })))
+      .catch((e) =>
+        setPreviews((p) => ({
+          ...p,
+          [key]: { loading: false, error: e instanceof Error ? e.message : "加载失败" },
+        }))
+      );
+  };
 
   const datasources = useQuery({
     queryKey: ["datasources"],
@@ -315,23 +332,78 @@ export default function DataSources() {
 
               {/* 展开的表结构 */}
               {expandedId === ds.id && (
-                <div className="mt-3 space-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                  {ds.tables.map((t) => (
-                    <div key={t.name}>
-                      <div className="mb-1 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-                        {t.name} · {t.columns.length} 列
+                <div className="mt-3 space-y-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                  {ds.tables.map((t) => {
+                    const key = `${ds.id}:${t.name}`;
+                    const pv = previews[key];
+                    return (
+                      <div key={t.name}>
+                        <div className="flex items-center gap-2">
+                          <div className="min-w-0 flex-1 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                            {t.name} · {t.columns.length} 列
+                          </div>
+                          <button
+                            onClick={() => loadPreview(ds.id, t.name)}
+                            disabled={pv?.loading}
+                            className="shrink-0 rounded-md px-2 py-0.5 text-[11px] font-medium text-teal-600 transition-colors hover:bg-teal-600/10 disabled:opacity-50 dark:text-teal-400 dark:hover:bg-teal-500/10"
+                          >
+                            {pv?.loading ? "加载中…" : pv?.data ? "刷新预览" : "预览数据"}
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {t.columns.slice(0, 10).map((c) => (
+                            <Badge key={c.name}>
+                              {c.name}
+                              <span className="text-zinc-400"> {c.type.split("(")[0]}</span>
+                            </Badge>
+                          ))}
+                          {t.columns.length > 10 && <Badge>+{t.columns.length - 10}</Badge>}
+                        </div>
+                        {pv?.error && (
+                          <div className="mt-1.5 rounded-lg bg-red-50 px-2 py-1 text-[11px] text-red-600 dark:bg-red-950/40 dark:text-red-400">
+                            {pv.error}
+                          </div>
+                        )}
+                        {pv?.data && (
+                          <div className="scroll-thin mt-1.5 max-h-48 overflow-auto rounded-lg border border-zinc-100 dark:border-zinc-800">
+                            <table className="w-full text-[11.5px]">
+                              <thead>
+                                <tr className="bg-zinc-50 dark:bg-zinc-800/60">
+                                  {pv.data.columns.map((c) => (
+                                    <th
+                                      key={c}
+                                      className="px-2 py-1 text-left font-medium text-zinc-500 dark:text-zinc-400"
+                                    >
+                                      {c}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {pv.data.rows.map((row, i) => (
+                                  <tr key={i} className="border-t border-zinc-50 dark:border-zinc-800/60">
+                                    {row.map((cell, j) => (
+                                      <td
+                                        key={j}
+                                        className="px-2 py-1 text-zinc-700 dark:text-zinc-300"
+                                      >
+                                        {cell == null ? "—" : String(cell)}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {pv.data.total_rows != null && (
+                              <div className="px-2 py-1 text-[10px] text-zinc-400 dark:text-zinc-600">
+                                预览前 {pv.data.rows.length} 行，共 {pv.data.total_rows.toLocaleString()} 行
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {t.columns.slice(0, 10).map((c) => (
-                          <Badge key={c.name}>
-                            {c.name}
-                            <span className="text-zinc-400"> {c.type.split("(")[0]}</span>
-                          </Badge>
-                        ))}
-                        {t.columns.length > 10 && <Badge>+{t.columns.length - 10}</Badge>}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 

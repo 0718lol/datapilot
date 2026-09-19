@@ -4,15 +4,31 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from ..agent import pipeline
 from ..auth import get_current_user
 from ..config import settings
 from ..db import get_db
-from ..engine.connectors import DatabaseConnector, test_connection
+from ..engine.connectors import (
+    DatabaseConnector,
+    connector_for_datasource,
+    test_connection,
+)
 from ..engine.duckdb_manager import QueryError, duck_manager, sanitize_table_name
-from ..models import DataSource, User
+from ..models import DashboardItem, DataSource, User
 from ..schemas import ColumnInfo, DataSourceOut, DatabaseConnectRequest, TableInfo
 
 router = APIRouter(prefix="/api/datasources", tags=["datasources"])
+
+
+def ds_to_ctx(ds: DataSource) -> dict:
+    """DataSource ORM → 管线/连接器使用的字典上下文。"""
+    return {
+        "id": ds.id,
+        "name": ds.name,
+        "kind": ds.kind,
+        "connection_json": ds.connection_json,
+        "schema_json": ds.schema_json,
+    }
 
 # 外部库连接缓存需要的最小信息（删除数据源时清理用）
 
@@ -142,6 +158,35 @@ def connect_database(
     return _to_out(ds)
 
 
+@router.get("/{ds_id}/preview")
+def preview_table(
+    ds_id: str,
+    table: str,
+    limit: int = 20,
+    db=Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """表数据预览：前 N 行（默认 20，上限 50）。表名先与探查结果核对，防注入。"""
+    ds = get_datasource_or_404(db, ds_id)
+    connector = connector_for_datasource(ds_to_ctx(ds))
+    known = {t["name"] for t in connector.tables()}
+    if table not in known:
+        raise HTTPException(status_code=400, detail=f"表 {table} 不存在于该数据源")
+
+    lim = max(1, min(limit, 50))
+    sql = f'SELECT * FROM "{table}" LIMIT {lim}'
+    try:
+        guarded = pipeline._guard_sql(sql, connector.dialect)
+        columns, rows = connector.execute_select(guarded)
+    except QueryError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    return {
+        "columns": columns,
+        "rows": rows[:lim],
+        "total_rows": ds.row_count if ds.kind == "csv" else None,
+    }
+
+
 @router.delete("/{ds_id}")
 def delete_datasource(
     ds_id: str, db=Depends(get_db), user: User = Depends(get_current_user)
@@ -150,6 +195,8 @@ def delete_datasource(
     if ds.kind == "csv":
         duck_manager.drop_view(ds.name)
         Path(ds.file_path).unlink(missing_ok=True)
+    # SQLite 不强制外键级联，显式清理依赖该数据源的仪表盘卡片
+    db.query(DashboardItem).filter(DashboardItem.datasource_id == ds_id).delete()
     db.delete(ds)
     db.commit()
     return {"ok": True}

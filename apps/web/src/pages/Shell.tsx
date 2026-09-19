@@ -3,6 +3,7 @@ import {
   BarChart3,
   Database,
   FlaskConical,
+  LayoutDashboard,
   LogOut,
   Moon,
   Settings as SettingsIcon,
@@ -13,6 +14,7 @@ import { useAuthStore, useUIStore } from "../store/auth";
 
 const NAV_ITEMS = [
   { to: "/", label: "工作台", icon: BarChart3, end: true },
+  { to: "/dashboards", label: "仪表盘", icon: LayoutDashboard, end: false },
   { to: "/datasources", label: "数据源", icon: Database, end: false },
   { to: "/evals", label: "评测", icon: FlaskConical, end: false },
   { to: "/settings", label: "设置", icon: SettingsIcon, end: false },

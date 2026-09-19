@@ -14,6 +14,7 @@ export const STAGE_ORDER: { key: StageKey; label: string }[] = [
 /** 一次回答在 UI 里的完整视图状态（流式进行中 / 已完成共用）。 */
 export interface AnswerView {
   stages: Record<StageKey, StageState>;
+  question?: string;
   streamingText?: string;
   explanation?: string;
   sql?: string;
@@ -46,6 +47,7 @@ export function viewFromContent(content: Partial<AssistantContent>): AnswerView 
       execute: content.error ? "active" : "done",
       visualize: "done",
     },
+    question: content.question,
     explanation: content.explanation,
     sql: content.sql ?? undefined,
     columns: content.columns,

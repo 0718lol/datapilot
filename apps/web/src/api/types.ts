@@ -99,3 +99,26 @@ export interface DatabaseConnectForm {
   username: string;
   password: string;
 }
+
+export interface DashboardItem {
+  id: string;
+  title: string;
+  datasource_id: string;
+  datasource_name: string;
+  sql: string;
+  chart_hint: string;
+  created_at: string;
+}
+
+export interface DashboardData {
+  columns: string[];
+  rows: unknown[][];
+  row_count: number;
+  chartSpec: ChartSpec;
+}
+
+export interface TablePreview {
+  columns: string[];
+  rows: unknown[][];
+  total_rows: number | null;
+}

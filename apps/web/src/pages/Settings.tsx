@@ -89,7 +89,7 @@ export default function Settings() {
             </div>
             <div className="flex items-start gap-2">
               <Check dot />
-              查询自动附加行数上限（默认 200 行）并限时执行
+              查询自动附加行数上限（默认 200 行），全部仅只读执行
             </div>
             <div className="flex items-start gap-2">
               <Check dot />
