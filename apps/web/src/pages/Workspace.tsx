@@ -144,6 +144,9 @@ export default function Workspace() {
 
   const streaming = streamView !== null;
   const hasMessages = messages.length > 0 || streaming;
+  // 当前打开的会话是否处于归档状态（只读查看，恢复后才能继续提问）
+  const viewingArchivedConv =
+    !!convId && !streaming && (archived.data ?? []).some((c) => c.id === convId);
 
   const loadMessages = useCallback(async (id: string | null) => {
     if (!id) {
@@ -167,7 +170,7 @@ export default function Workspace() {
   useEffect(scrollToEnd, [messages.length, streamView, scrollToEnd]);
 
   const ask = async (question: string) => {
-    if (!question.trim() || streaming) return;
+    if (!question.trim() || streaming || viewingArchivedConv) return;
     if (dsList.length === 0) {
       if (datasources.isError) {
         // 接口临时不可用：给出明确反馈并触发自动重试，而不是静默无效
@@ -273,6 +276,14 @@ export default function Workspace() {
     void loadMessages(id);
   };
 
+  // 只读打开归档会话
+  const openArchived = (id: string) => {
+    if (streaming) return;
+    setConvId(id);
+    setStreamView(null);
+    void loadMessages(id);
+  };
+
   const newAnalysis = () => {
     if (streaming) return;
     setConvId(null);
@@ -341,11 +352,29 @@ export default function Workspace() {
             ? (archived.data ?? []).map((c) => (
                 <div
                   key={c.id}
-                  className="group relative mb-0.5 rounded-lg px-3 py-2 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  className={clsx(
+                    "group relative mb-0.5 rounded-lg transition-colors",
+                    c.id === convId
+                      ? "bg-amber-500/10"
+                      : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  )}
                 >
-                  <div className="truncate pr-16 text-[13px] text-zinc-400 dark:text-zinc-500">
-                    {c.title}
-                  </div>
+                  <button
+                    onClick={() => openArchived(c.id)}
+                    title="查看归档对话（只读）"
+                    className="w-full px-3 py-2 pr-16 text-left"
+                  >
+                    <div
+                      className={clsx(
+                        "truncate text-[13px]",
+                        c.id === convId
+                          ? "font-medium text-amber-600 dark:text-amber-400"
+                          : "text-zinc-400 dark:text-zinc-500"
+                      )}
+                    >
+                      {c.title}
+                    </div>
+                  </button>
                   <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-all group-hover:opacity-100">
                     <button
                       title="恢复到活跃对话"
@@ -513,12 +542,15 @@ export default function Workspace() {
                   }
                 }}
                 rows={1}
+                disabled={viewingArchivedConv}
                 placeholder={
-                  dsList.length > 0
-                    ? "向你的数据提问，例如：上月各地区销售额是多少？"
-                    : "先上传 CSV 或连接数据库，再开始提问"
+                  viewingArchivedConv
+                    ? "该会话已归档，恢复后才能继续提问"
+                    : dsList.length > 0
+                      ? "向你的数据提问，例如：上月各地区销售额是多少？"
+                      : "先上传 CSV 或连接数据库，再开始提问"
                 }
-                className="scroll-thin max-h-32 min-h-[38px] flex-1 resize-none bg-transparent px-2 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                className="scroll-thin max-h-32 min-h-[38px] flex-1 resize-none bg-transparent px-2 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:text-zinc-100 dark:placeholder:text-zinc-500"
               />
               {streaming ? (
                 <Button
@@ -531,14 +563,21 @@ export default function Workspace() {
                   停止
                 </Button>
               ) : (
-                <Button size="md" onClick={() => void ask(input)} disabled={!input.trim()} className="shrink-0">
+                <Button
+                  size="md"
+                  onClick={() => void ask(input)}
+                  disabled={!input.trim() || viewingArchivedConv}
+                  className="shrink-0"
+                >
                   发送
                   <SendHorizontal className="h-4 w-4" />
                 </Button>
               )}
             </div>
             <p className="mt-2 text-center text-[11px] text-zinc-400 dark:text-zinc-600">
-              Enter 发送 · Shift + Enter 换行 · SQL 仅只读执行
+              {viewingArchivedConv
+                ? "正在查看已归档的对话（只读）· 在左侧点击恢复图标可继续提问"
+                : "Enter 发送 · Shift + Enter 换行 · SQL 仅只读执行"}
             </p>
           </div>
         </div>
