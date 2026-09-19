@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import {
   Database,
   Eraser,
@@ -57,8 +58,17 @@ export default function Workspace() {
     refetchInterval: (query) => (query.state.status === "error" ? 3000 : false),
   });
   const dsList = datasources.data ?? [];
-  // 多数据源时可切换；默认取第一个
-  const activeDsId = selectedDsId ?? dsList[0]?.id ?? null;
+  // 从数据源页"去提问"跳转时预选指定数据源（仅生效一次）
+  const [searchParams] = useSearchParams();
+  const initialDsRef = useRef(searchParams.get("ds"));
+  useEffect(() => {
+    if (initialDsRef.current) setSelectedDsId(initialDsRef.current);
+  }, []);
+  // 多数据源时可切换；默认取第一个；选中的数据源被删后自动回退
+  const activeDsId =
+    selectedDsId && dsList.some((d) => d.id === selectedDsId)
+      ? selectedDsId
+      : (dsList[0]?.id ?? null);
 
   const upload = useMutation({
     mutationFn: (file: File) => {

@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import {
+  ChevronDown,
   Database,
   FileSpreadsheet,
   Plug,
@@ -26,9 +28,11 @@ const EMPTY_FORM: DatabaseConnectForm = {
 
 export default function DataSources() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<Mode>("csv");
   const [dragOver, setDragOver] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [form, setForm] = useState<DatabaseConnectForm>(EMPTY_FORM);
   const [testResult, setTestResult] = useState<string | null>(null);
 
@@ -270,22 +274,34 @@ export default function DataSources() {
               className="group rounded-2xl border border-zinc-200 bg-white p-4 shadow-xs transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900"
             >
               <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600/10 text-teal-600 dark:text-teal-400">
-                  {ds.kind === "csv" ? <FileSpreadsheet className="h-4 w-4" /> : <Database className="h-4 w-4" />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                      {ds.name}
-                    </span>
-                    <Badge>{ds.kind === "csv" ? "CSV" : "数据库"}</Badge>
+                <button
+                  onClick={() => setExpandedId(expandedId === ds.id ? null : ds.id)}
+                  className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                  title={expandedId === ds.id ? "收起表结构" : "展开表结构"}
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600/10 text-teal-600 dark:text-teal-400">
+                    {ds.kind === "csv" ? <FileSpreadsheet className="h-4 w-4" /> : <Database className="h-4 w-4" />}
                   </div>
-                  <div className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
-                    {ds.kind === "csv"
-                      ? `${ds.original_name} · ${ds.row_count.toLocaleString()} 行`
-                      : `${ds.original_name} · ${ds.tables.length} 张表`}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {ds.name}
+                      </span>
+                      <Badge>{ds.kind === "csv" ? "CSV" : "数据库"}</Badge>
+                      <ChevronDown
+                        className={clsx(
+                          "h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform",
+                          expandedId === ds.id && "rotate-180"
+                        )}
+                      />
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
+                      {ds.kind === "csv"
+                        ? `${ds.original_name} · ${ds.row_count.toLocaleString()} 行`
+                        : `${ds.original_name} · ${ds.tables.length} 张表`}
+                    </div>
                   </div>
-                </div>
+                </button>
                 <button
                   onClick={() => {
                     if (window.confirm(`确定删除数据源「${ds.name}」？`)) remove.mutate(ds.id);
@@ -296,11 +312,36 @@ export default function DataSources() {
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {ds.tables.flatMap((t) => t.columns.slice(0, 6)).slice(0, 8).map((c, i) => (
-                  <Badge key={`${ds.id}-${i}`}>{c.name}</Badge>
-                ))}
-              </div>
+
+              {/* 展开的表结构 */}
+              {expandedId === ds.id && (
+                <div className="mt-3 space-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+                  {ds.tables.map((t) => (
+                    <div key={t.name}>
+                      <div className="mb-1 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {t.name} · {t.columns.length} 列
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {t.columns.slice(0, 10).map((c) => (
+                          <Badge key={c.name}>
+                            {c.name}
+                            <span className="text-zinc-400"> {c.type.split("(")[0]}</span>
+                          </Badge>
+                        ))}
+                        {t.columns.length > 10 && <Badge>+{t.columns.length - 10}</Badge>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 去工作台提问 */}
+              <button
+                onClick={() => navigate(`/?ds=${ds.id}`)}
+                className="mt-3 w-full rounded-xl border border-zinc-200 px-3 py-2 text-[13px] font-medium text-zinc-600 transition-colors hover:border-teal-600 hover:bg-teal-600/5 hover:text-teal-700 dark:border-zinc-800 dark:text-zinc-300 dark:hover:border-teal-500 dark:hover:text-teal-400"
+              >
+                去工作台向它提问 →
+              </button>
             </div>
           ))}
         </div>
