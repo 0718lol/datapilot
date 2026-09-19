@@ -35,6 +35,8 @@ export default function DataSources() {
   const datasources = useQuery({
     queryKey: ["datasources"],
     queryFn: () => api.get<DataSource[]>("/datasources"),
+    retry: 2,
+    refetchInterval: (query) => (query.state.status === "error" ? 5000 : false),
   });
 
   const upload = useMutation({
@@ -248,6 +250,19 @@ export default function DataSources() {
         <h2 className="mb-3 mt-8 text-[13px] font-medium text-zinc-500 dark:text-zinc-400">
           已接入的数据源（{datasources.data?.length ?? 0}）
         </h2>
+        {datasources.isError && (
+          <div className="mb-4 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-[13px] text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+            <span className="flex-1">
+              数据源列表加载失败，每 5 秒自动重试中…
+            </span>
+            <button
+              onClick={() => void datasources.refetch()}
+              className="shrink-0 rounded-lg border border-red-300 px-2.5 py-1 text-xs font-medium hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900/40"
+            >
+              立即重试
+            </button>
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           {(datasources.data ?? []).map((ds) => (
             <div

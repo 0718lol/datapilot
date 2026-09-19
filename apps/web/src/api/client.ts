@@ -51,11 +51,13 @@ export async function streamAsk(
   conversationId: string,
   question: string,
   datasourceId: string | null,
+  signal: AbortSignal | undefined,
   onEvent: (event: SSEEvent) => void
 ): Promise<void> {
   const token = useAuthStore.getState().token;
   const resp = await fetch(`/api/conversations/${conversationId}/ask`, {
     method: "POST",
+    signal,
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

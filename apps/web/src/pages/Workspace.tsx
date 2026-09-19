@@ -32,9 +32,12 @@ export default function Workspace() {
   const queryClient = useQueryClient();
   const [convId, setConvId] = useState<string | null>(null);
   const [selectedDsId, setSelectedDsId] = useState<string | null>(null);
-  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
+  // 服务端消息是唯一事实来源；流式期间本地乐观消息叠加显示
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [streamView, setStreamView] = useState<AnswerView | null>(null);
   const [input, setInput] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -42,10 +45,14 @@ export default function Workspace() {
   const conversations = useQuery({
     queryKey: ["conversations"],
     queryFn: () => api.get<Conversation[]>("/conversations"),
+    retry: 2,
   });
   const datasources = useQuery({
     queryKey: ["datasources"],
     queryFn: () => api.get<DataSource[]>("/datasources"),
+    retry: 2,
+    // 失败后每 3 秒自动重试直到恢复（如后端短暂重启期间加载的页面）
+    refetchInterval: (query) => (query.state.status === "error" ? 3000 : false),
   });
   const dsList = datasources.data ?? [];
   // 多数据源时可切换；默认取第一个
@@ -61,42 +68,73 @@ export default function Workspace() {
   });
 
   const streaming = streamView !== null;
-  const hasMessages = localMessages.length > 0 || streaming;
+  const hasMessages = messages.length > 0 || streaming;
+
+  const loadMessages = useCallback(async (id: string | null) => {
+    if (!id) {
+      setMessages([]);
+      return;
+    }
+    setLoadingHistory(true);
+    try {
+      setMessages(await api.get<ChatMessage[]>(`/conversations/${id}/messages`));
+    } catch {
+      // 拉取失败保留现状，下次切换会话或重新提问时重试
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
 
   const scrollToEnd = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, []);
 
-  useEffect(scrollToEnd, [localMessages.length, streamView, scrollToEnd]);
+  useEffect(scrollToEnd, [messages.length, streamView, scrollToEnd]);
 
   const ask = async (question: string) => {
     if (!question.trim() || streaming) return;
     if (dsList.length === 0) {
+      if (datasources.isError) {
+        // 接口临时不可用：给出明确反馈并触发自动重试，而不是静默无效
+        void datasources.refetch();
+        setNotice("数据源加载失败，正在自动重试…恢复后即可提问");
+        return;
+      }
       fileRef.current?.click();
+      setNotice("请先上传 CSV 或连接数据库，再开始提问");
       return;
     }
+    setNotice(null);
 
-    let id = convId;
-    if (!id) {
-      const conv = await api.post<Conversation>("/conversations", {
-        title: question.slice(0, 30),
-      });
-      id = conv.id;
-      setConvId(id);
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    let id: string;
+    try {
+      let current = convId;
+      if (!current) {
+        const conv = await api.post<Conversation>("/conversations", {
+          title: question.slice(0, 30),
+        });
+        current = conv.id;
+        setConvId(conv.id);
+        queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      }
+      id = current;
+
+      setMessages((m) => [
+        ...m,
+        { id: `local-${Date.now()}`, role: "user", content: { text: question } },
+      ]);
+      setInput("");
+      setStreamView(initialView());
+    } catch (err) {
+      // 会话创建失败必须可见，不能静默吞掉
+      setNotice(err instanceof Error ? err.message : "创建会话失败，请重试");
+      return;
     }
-
-    setLocalMessages((m) => [
-      ...m,
-      { id: `local-${Date.now()}`, role: "user", content: { text: question } },
-    ]);
-    setInput("");
-    setStreamView(initialView());
 
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      await streamAsk(id, question, activeDsId, (event) => {
+      await streamAsk(id, question, activeDsId, controller.signal, (event) => {
         setStreamView((prev) => {
           const view: AnswerView = prev ?? initialView();
           switch (event.type) {
@@ -129,52 +167,44 @@ export default function Workspace() {
         });
       });
     } catch (err) {
-      const base = streamView ?? initialView();
-      setStreamView({
-        ...base,
-        stages: finishStages(base.stages),
-        error: {
-          stage: "generate",
-          message: err instanceof Error ? err.message : "网络错误，请重试",
-        },
+      if (controller.signal.aborted) return; // 用户主动停止
+      setStreamView((prev) => {
+        const base = prev ?? initialView();
+        return {
+          ...base,
+          stages: finishStages(base.stages),
+          error: {
+            stage: "generate",
+            message: err instanceof Error ? err.message : "网络错误，请重试",
+          },
+        };
       });
+      return;
     } finally {
       abortRef.current = null;
-      setStreamView((prev) => (prev ? { ...prev, stages: finishStages(prev.stages) } : null));
-      if (id) queryClient.invalidateQueries({ queryKey: ["messages", id] });
-      // 流结束后刷新历史，随后清空本地流式状态
-      setTimeout(() => {
-        setStreamView(null);
-        setLocalMessages((m) => m.filter((x) => !x.id.startsWith("local-")));
-        if (id) queryClient.invalidateQueries({ queryKey: ["messages", id] });
-      }, 400);
     }
+
+    // 流结束：直接以服务端消息为准刷新（本地乐观消息与流式卡片一并替换），
+    // 不依赖缓存失效时序，杜绝"跳回空状态"的竞态
+    await loadMessages(id);
+    setStreamView(null);
   };
 
   const selectConversation = (id: string) => {
     if (streaming) return;
     setConvId(id);
-    setLocalMessages([]);
     setStreamView(null);
+    setNotice(null);
+    void loadMessages(id);
   };
 
   const newAnalysis = () => {
     if (streaming) return;
     setConvId(null);
-    setLocalMessages([]);
+    setMessages([]);
     setStreamView(null);
+    setNotice(null);
   };
-
-  const history = useQuery({
-    queryKey: ["messages", convId],
-    enabled: convId !== null,
-    queryFn: () => api.get<ChatMessage[]>(`/conversations/${convId}/messages`),
-  });
-
-  const shownMessages: ChatMessage[] = [
-    ...(convId ? (history.data ?? []) : []),
-    ...localMessages,
-  ];
 
   return (
     <div className="flex h-full">
@@ -225,7 +255,7 @@ export default function Workspace() {
             />
           ) : (
             <div className="mx-auto max-w-3xl space-y-6 px-6 py-8">
-              {shownMessages.map((m) =>
+              {messages.map((m) =>
                 m.role === "user" ? (
                   <div key={m.id} className="flex justify-end">
                     <div className="max-w-[85%] rounded-2xl rounded-br-md bg-teal-600 px-4 py-2.5 text-sm leading-relaxed text-white shadow-sm">
@@ -237,9 +267,43 @@ export default function Workspace() {
                 )
               )}
               {streamView && <AssistantCard view={streamView} />}
+              {loadingHistory && messages.length === 0 && (
+                <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-600">
+                  加载对话中…
+                </p>
+              )}
             </div>
           )}
         </div>
+
+        {(datasources.isError || notice) && (
+          <div className="shrink-0 px-6 pt-3">
+            <div className="mx-auto max-w-3xl space-y-2">
+              {datasources.isError && (
+                <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-[13px] text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+                  <span className="min-w-0 flex-1">
+                    数据源加载失败（
+                    {datasources.error instanceof Error
+                      ? datasources.error.message
+                      : "网络错误"}
+                    ），每 3 秒自动重试中…
+                  </span>
+                  <button
+                    onClick={() => void datasources.refetch()}
+                    className="shrink-0 rounded-lg border border-red-300 px-2.5 py-1 text-xs font-medium transition-colors hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900/40"
+                  >
+                    立即重试
+                  </button>
+                </div>
+              )}
+              {notice && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[13px] text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+                  {notice}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* 输入区 */}
         <div className="shrink-0 border-t border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-900">
