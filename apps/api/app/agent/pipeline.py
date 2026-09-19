@@ -63,7 +63,7 @@ def run_question(
         raise PipelineError("schema", str(e)) from None
 
     yield {"type": "status", "stage": "generate", "label": STAGES["generate"]}
-    system = _system_prompt()
+    system = _system_prompt(connector.dialect)
     user = _user_prompt(question, _schema_context(tables), history)
     buffer = ""
     try:
@@ -147,17 +147,21 @@ def _schema_context(tables: list[dict[str, Any]]) -> str:
     return "\n\n".join(blocks)
 
 
-def _system_prompt() -> str:
+def _system_prompt(dialect: str = "duckdb") -> str:
+    quote_rule = (
+        "标识符（表名、列名）用反引号包裹" if dialect == "mysql"
+        else "含中文或特殊字符的标识符（表名、列名）用双引号包裹"
+    )
     return (
         "你是数据分析助手 DataPilot。用户会提供数据库中的表结构和分析问题，"
         "你的任务是基于表结构写出正确的 SQL 并简要解释思路。\n"
+        f"目标数据库方言：{dialect}。{quote_rule}。\n"
         "硬性要求：\n"
         "1. 只允许生成一条只读的 SELECT/WITH 查询，绝不生成任何修改数据的语句。\n"
-        "2. 含中文或特殊字符的表名、列名必须用双引号包裹。\n"
-        "3. 聚合结果应配合 ORDER BY，需要时使用 LIMIT 控制行数。\n"
-        "4. 输出格式：先用不超过 120 字的中文说明分析思路；然后单独一行输出 ```json 围栏代码块，"
+        "2. 聚合结果应配合 ORDER BY，需要时使用 LIMIT 控制行数。\n"
+        "3. 输出格式：先用不超过 120 字的中文说明分析思路；然后单独一行输出 ```json 围栏代码块，"
         '内容为 {"sql": "生成的SQL", "chart_hint": "bar|line|table"}。\n'
-        "5. chart_hint 选择：时间序列用 line，类别对比用 bar，其余用 table。"
+        "4. chart_hint 选择：时间序列用 line，类别对比用 bar，其余用 table。"
     )
 
 
@@ -205,10 +209,20 @@ def _parse_response(text: str) -> tuple[str, str | None, str | None]:
 
 
 def _guard_sql(sql: str, dialect: str = "duckdb") -> str:
-    """安全防护：单条语句、只读 SELECT、强制行数上限。"""
+    """安全防护：单条语句、只读 SELECT、强制行数上限，并按方言序列化。
+
+    最后一步的按方言序列化（sqlglot transpile）是关键：模型按提示词用
+    双引号包裹标识符，这对 DuckDB/PostgreSQL/SQLite 合法，但 MySQL 默认
+    模式下双引号是字符串字面量——这里统一转成目标方言的引用风格
+    （MySQL 输出反引号），不依赖模型自觉。
+    """
     sql = sql.strip().rstrip(";").strip()
     if not sql:
         raise QueryError("SQL 为空。")
+    if dialect == "mysql":
+        # MySQL 默认模式双引号是字符串字面量；模型按提示词可能仍输出双引号
+        # 标识符，先统一转为反引号再解析，保证列名不被当成字符串
+        sql = re.sub(r'"([^"]*)"', r"`\1`", sql)
     try:
         statements = sqlglot.parse(sql, read=dialect)
     except sqlglot.errors.ParseError as e:
@@ -222,5 +236,5 @@ def _guard_sql(sql: str, dialect: str = "duckdb") -> str:
         if isinstance(node, _FORBIDDEN_NODES):
             raise QueryError("检测到非只读操作，已拦截。")
     if tree.args.get("limit") is None:
-        sql = f"SELECT * FROM ({sql}) AS _guarded LIMIT {settings.max_rows}"
-    return sql
+        return f"SELECT * FROM ({tree.sql(dialect=dialect)}) AS _guarded LIMIT {settings.max_rows}"
+    return tree.sql(dialect=dialect)
