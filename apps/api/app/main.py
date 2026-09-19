@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from .config import settings
 from .db import Base, SessionLocal, engine
@@ -58,6 +59,25 @@ def create_app() -> FastAPI:
 def _init_storage() -> None:
     Path(settings.data_dir).mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    _migrate()
+
+
+def _migrate() -> None:
+    """轻量迁移：create_all 只建新表不加列，已有表缺的列在此补齐。
+
+    达到 Alembic 引入门槛前的过渡方案。
+    """
+    import sqlalchemy
+
+    insp = sqlalchemy.inspect(engine)
+    if "conversations" in insp.get_table_names():
+        cols = [c["name"] for c in insp.get_columns("conversations")]
+        if "archived_at" not in cols:
+            col_type = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+            with engine.begin() as conn:
+                conn.execute(
+                    text(f"ALTER TABLE conversations ADD COLUMN archived_at {col_type}")
+                )
 
 
 def _seed() -> None:

@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 from ..agent import pipeline
 from ..auth import get_current_user
 from ..db import SessionLocal, get_db
-from ..models import Conversation, Message, User
+from ..models import Conversation, Message, User, utcnow
 from ..schemas import AskRequest, ConversationCreate, ConversationOut
 from .datasources import get_datasource_or_404
 
@@ -15,13 +15,15 @@ router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 
 @router.get("", response_model=list[ConversationOut])
-def list_conversations(db=Depends(get_db), user: User = Depends(get_current_user)):
-    rows = (
-        db.query(Conversation)
-        .order_by(Conversation.created_at.desc())
-        .limit(100)
-        .all()
-    )
+def list_conversations(
+    archived: bool = False,
+    db=Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """archived=False 列活跃会话，True 列已归档会话。"""
+    q = db.query(Conversation)
+    q = q.filter(Conversation.archived_at.isnot(None) if archived else Conversation.archived_at.is_(None))
+    rows = q.order_by(Conversation.created_at.desc()).limit(100).all()
     return [
         ConversationOut(id=c.id, title=c.title, created_at=c.created_at.isoformat())
         for c in rows
@@ -44,21 +46,10 @@ def create_conversation(
     )
 
 
-@router.delete("/{conv_id}")
-def delete_conversation(conv_id: str, db=Depends(get_db), user=Depends(get_current_user)):
-    conv = db.query(Conversation).filter_by(id=conv_id).first()
-    if conv is None:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    # SQLite 默认不启用外键级联，显式删除消息保证两种数据库行为一致
-    db.query(Message).filter(Message.conversation_id == conv_id).delete()
-    db.delete(conv)
-    db.commit()
-    return {"ok": True}
-
-
-@router.delete("")
-def clear_conversations(db=Depends(get_db), user=Depends(get_current_user)):
-    ids = [c.id for c in db.query(Conversation).all()]
+@router.delete("/archive/purge")
+def purge_archived(db=Depends(get_db), user: User = Depends(get_current_user)):
+    """彻底清空归档（不可恢复）。"""
+    ids = [c.id for c in db.query(Conversation).filter(Conversation.archived_at.isnot(None)).all()]
     if ids:
         db.query(Message).filter(Message.conversation_id.in_(ids)).delete(
             synchronize_session=False
@@ -68,6 +59,54 @@ def clear_conversations(db=Depends(get_db), user=Depends(get_current_user)):
         )
         db.commit()
     return {"ok": True, "deleted": len(ids)}
+
+
+@router.delete("/{conv_id}")
+def delete_conversation(conv_id: str, db=Depends(get_db), user: User = Depends(get_current_user)):
+    """删除 = 移入归档（软删除），可在归档中恢复或彻底删除。"""
+    conv = db.query(Conversation).filter_by(id=conv_id).first()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if conv.archived_at is None:
+        conv.archived_at = utcnow()
+        db.commit()
+    return {"ok": True, "archived": True}
+
+
+@router.delete("/{conv_id}/permanent")
+def delete_conversation_permanently(
+    conv_id: str, db=Depends(get_db), user: User = Depends(get_current_user)
+):
+    conv = db.query(Conversation).filter_by(id=conv_id).first()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    db.query(Message).filter(Message.conversation_id == conv_id).delete()
+    db.delete(conv)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{conv_id}/restore")
+def restore_conversation(conv_id: str, db=Depends(get_db), user: User = Depends(get_current_user)):
+    conv = db.query(Conversation).filter_by(id=conv_id).first()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    conv.archived_at = None
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("")
+def clear_conversations(db=Depends(get_db), user: User = Depends(get_current_user)):
+    """清空活跃会话 = 全部移入归档。"""
+    now = utcnow()
+    count = (
+        db.query(Conversation)
+        .filter(Conversation.archived_at.is_(None))
+        .update({Conversation.archived_at: now}, synchronize_session=False)
+    )
+    db.commit()
+    return {"ok": True, "archived": count}
 
 
 @router.get("/{conv_id}/messages")

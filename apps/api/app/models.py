@@ -83,6 +83,8 @@ class Conversation(Base):
     workspace_id: Mapped[str] = mapped_column(String(32), default="default", index=True)
     created_by: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # 删除 = 归档（软删除）；NULL 为活跃，非 NULL 为已归档
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Message(Base):

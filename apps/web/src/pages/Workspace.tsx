@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import {
+  ArchiveRestore,
   Database,
   Eraser,
   MessageSquarePlus,
@@ -50,6 +51,12 @@ export default function Workspace() {
     queryFn: () => api.get<Conversation[]>("/conversations"),
     retry: 2,
   });
+  const [showArchived, setShowArchived] = useState(false);
+  const archived = useQuery({
+    queryKey: ["conversations", "archived"],
+    queryFn: () => api.get<Conversation[]>("/conversations?archived=true"),
+    retry: 2,
+  });
   const datasources = useQuery({
     queryKey: ["datasources"],
     queryFn: () => api.get<DataSource[]>("/datasources"),
@@ -84,11 +91,33 @@ export default function Workspace() {
     onSuccess: (_r, id) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       if (id === convId) {
-        // 删除的是当前打开的会话 → 回到新建状态
+        // 归档的是当前打开的会话 → 回到新建状态
         setConvId(null);
         setMessages([]);
         setStreamView(null);
       }
+    },
+  });
+
+  const restoreConv = useMutation({
+    mutationFn: (id: string) => api.post(`/conversations/${id}/restore`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["conversations", "archived"] });
+    },
+  });
+
+  const purgeConv = useMutation({
+    mutationFn: (id: string) => api.del(`/conversations/${id}/permanent`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations", "archived"] });
+    },
+  });
+
+  const purgeArchive = useMutation({
+    mutationFn: () => api.del("/conversations/archive/purge"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations", "archived"] });
     },
   });
 
@@ -266,62 +295,120 @@ export default function Workspace() {
             <MessageSquarePlus className="h-4 w-4 text-teal-600 dark:text-teal-400" />
             新建分析
           </Button>
-          {(conversations.data?.length ?? 0) > 0 && (
-            <button
-              onClick={() => {
-                if (
-                  window.confirm(
-                    `确定清空全部 ${conversations.data!.length} 条会话？此操作不可恢复。`
+          {showArchived ? (
+            (archived.data?.length ?? 0) > 0 && (
+              <button
+                onClick={() => {
+                  if (window.confirm(`彻底清空归档中的 ${archived.data!.length} 条会话？此操作不可恢复。`))
+                    purgeArchive.mutate();
+                }}
+                disabled={purgeArchive.isPending}
+                className="flex w-full items-center justify-start gap-2 rounded-lg px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950/30"
+              >
+                <Eraser className="h-3.5 w-3.5" />
+                {purgeArchive.isPending ? "清空中…" : "清空归档（彻底删除）"}
+              </button>
+            )
+          ) : (
+            (conversations.data?.length ?? 0) > 0 && (
+              <button
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `清空全部 ${conversations.data!.length} 条会话？它们将移入已归档，可随时恢复。`
+                    )
                   )
-                )
-                  clearConvs.mutate();
-              }}
-              disabled={streaming || clearConvs.isPending}
-              className="flex w-full items-center justify-start gap-2 rounded-lg px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950/30"
-            >
-              <Eraser className="h-3.5 w-3.5" />
-              {clearConvs.isPending ? "清空中…" : "清空全部会话"}
-            </button>
+                    clearConvs.mutate();
+                }}
+                disabled={streaming || clearConvs.isPending}
+                className="flex w-full items-center justify-start gap-2 rounded-lg px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950/30"
+              >
+                <Eraser className="h-3.5 w-3.5" />
+                {clearConvs.isPending ? "清空中…" : "清空全部会话"}
+              </button>
+            )
           )}
+          <button
+            onClick={() => setShowArchived((v) => !v)}
+            className="flex w-full items-center justify-start gap-2 rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <ArchiveRestore className="h-3.5 w-3.5" />
+            {showArchived ? "返回活跃对话" : `已归档对话 (${archived.data?.length ?? 0})`}
+          </button>
         </div>
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {(conversations.data ?? []).map((c) => (
-            <div
-              key={c.id}
-              className={clsx(
-                "group relative mb-0.5 rounded-lg transition-colors",
-                c.id === convId
-                  ? "bg-teal-600/10"
-                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              )}
-            >
-              <button
-                onClick={() => selectConversation(c.id)}
-                className={clsx(
-                  "w-full px-3 py-2 pr-9 text-left text-[13px]",
-                  c.id === convId
-                    ? "font-medium text-teal-700 dark:text-teal-400"
-                    : "text-zinc-600 dark:text-zinc-400"
-                )}
-              >
-                <div className="truncate">{c.title}</div>
-              </button>
-              <button
-                title="删除会话"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (window.confirm(`删除会话「${c.title}」？`)) deleteConv.mutate(c.id);
-                }}
-                disabled={streaming || deleteConv.isPending}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-zinc-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 disabled:opacity-0 dark:text-zinc-600 dark:hover:bg-red-950/40"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-          {(conversations.data?.length ?? 0) === 0 && (
+          {showArchived
+            ? (archived.data ?? []).map((c) => (
+                <div
+                  key={c.id}
+                  className="group relative mb-0.5 rounded-lg px-3 py-2 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  <div className="truncate pr-16 text-[13px] text-zinc-400 dark:text-zinc-500">
+                    {c.title}
+                  </div>
+                  <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-0.5 opacity-0 transition-all group-hover:opacity-100">
+                    <button
+                      title="恢复到活跃对话"
+                      onClick={() => restoreConv.mutate(c.id)}
+                      disabled={restoreConv.isPending}
+                      className="rounded-md p-1 text-zinc-400 hover:bg-teal-600/10 hover:text-teal-600 disabled:opacity-50 dark:hover:text-teal-400"
+                    >
+                      <ArchiveRestore className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      title="彻底删除"
+                      onClick={() => {
+                        if (window.confirm(`彻底删除「${c.title}」？此操作不可恢复。`))
+                          purgeConv.mutate(c.id);
+                      }}
+                      disabled={purgeConv.isPending}
+                      className="rounded-md p-1 text-zinc-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950/40"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))
+            : (conversations.data ?? []).map((c) => (
+                <div
+                  key={c.id}
+                  className={clsx(
+                    "group relative mb-0.5 rounded-lg transition-colors",
+                    c.id === convId
+                      ? "bg-teal-600/10"
+                      : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  )}
+                >
+                  <button
+                    onClick={() => selectConversation(c.id)}
+                    className={clsx(
+                      "w-full px-3 py-2 pr-9 text-left text-[13px]",
+                      c.id === convId
+                        ? "font-medium text-teal-700 dark:text-teal-400"
+                        : "text-zinc-600 dark:text-zinc-400"
+                    )}
+                  >
+                    <div className="truncate">{c.title}</div>
+                  </button>
+                  <button
+                    title="移入归档"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`将「${c.title}」移入归档？之后可在已归档对话中找回。`))
+                        deleteConv.mutate(c.id);
+                    }}
+                    disabled={streaming || deleteConv.isPending}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-zinc-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 disabled:opacity-0 dark:text-zinc-600 dark:hover:bg-red-950/40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+          {(showArchived
+            ? (archived.data?.length ?? 0) === 0
+            : (conversations.data?.length ?? 0) === 0) && (
             <p className="px-3 py-6 text-center text-xs text-zinc-400 dark:text-zinc-600">
-              还没有分析记录
+              {showArchived ? "归档是空的" : "还没有分析记录"}
             </p>
           )}
         </div>
