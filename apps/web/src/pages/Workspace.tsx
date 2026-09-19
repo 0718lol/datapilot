@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Database,
+  Eraser,
   MessageSquarePlus,
   SendHorizontal,
   Square,
+  Trash2,
   Upload,
   Zap,
 } from "lucide-react";
@@ -65,6 +67,29 @@ export default function Workspace() {
       return api.upload("/datasources/upload", form);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["datasources"] }),
+  });
+
+  const deleteConv = useMutation({
+    mutationFn: (id: string) => api.del(`/conversations/${id}`),
+    onSuccess: (_r, id) => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      if (id === convId) {
+        // 删除的是当前打开的会话 → 回到新建状态
+        setConvId(null);
+        setMessages([]);
+        setStreamView(null);
+      }
+    },
+  });
+
+  const clearConvs = useMutation({
+    mutationFn: () => api.del("/conversations"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      setConvId(null);
+      setMessages([]);
+      setStreamView(null);
+    },
   });
 
   const streaming = streamView !== null;
@@ -210,7 +235,7 @@ export default function Workspace() {
     <div className="flex h-full">
       {/* 左栏：会话列表 */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-zinc-200 bg-white md:flex dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="p-3">
+        <div className="space-y-1 p-3">
           <Button
             variant="secondary"
             className="w-full justify-start"
@@ -220,21 +245,58 @@ export default function Workspace() {
             <MessageSquarePlus className="h-4 w-4 text-teal-600 dark:text-teal-400" />
             新建分析
           </Button>
+          {(conversations.data?.length ?? 0) > 0 && (
+            <button
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `确定清空全部 ${conversations.data!.length} 条会话？此操作不可恢复。`
+                  )
+                )
+                  clearConvs.mutate();
+              }}
+              disabled={streaming || clearConvs.isPending}
+              className="flex w-full items-center justify-start gap-2 rounded-lg px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950/30"
+            >
+              <Eraser className="h-3.5 w-3.5" />
+              {clearConvs.isPending ? "清空中…" : "清空全部会话"}
+            </button>
+          )}
         </div>
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {(conversations.data ?? []).map((c) => (
-            <button
+            <div
               key={c.id}
-              onClick={() => selectConversation(c.id)}
               className={clsx(
-                "mb-0.5 w-full rounded-lg px-3 py-2 text-left text-[13px] transition-colors",
+                "group relative mb-0.5 rounded-lg transition-colors",
                 c.id === convId
-                  ? "bg-teal-600/10 font-medium text-teal-700 dark:bg-teal-500/15 dark:text-teal-400"
-                  : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  ? "bg-teal-600/10"
+                  : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
               )}
             >
-              <div className="truncate">{c.title}</div>
-            </button>
+              <button
+                onClick={() => selectConversation(c.id)}
+                className={clsx(
+                  "w-full px-3 py-2 pr-9 text-left text-[13px]",
+                  c.id === convId
+                    ? "font-medium text-teal-700 dark:text-teal-400"
+                    : "text-zinc-600 dark:text-zinc-400"
+                )}
+              >
+                <div className="truncate">{c.title}</div>
+              </button>
+              <button
+                title="删除会话"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(`删除会话「${c.title}」？`)) deleteConv.mutate(c.id);
+                }}
+                disabled={streaming || deleteConv.isPending}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-zinc-300 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 disabled:opacity-0 dark:text-zinc-600 dark:hover:bg-red-950/40"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ))}
           {(conversations.data?.length ?? 0) === 0 && (
             <p className="px-3 py-6 text-center text-xs text-zinc-400 dark:text-zinc-600">

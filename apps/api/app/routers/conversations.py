@@ -44,6 +44,32 @@ def create_conversation(
     )
 
 
+@router.delete("/{conv_id}")
+def delete_conversation(conv_id: str, db=Depends(get_db), user=Depends(get_current_user)):
+    conv = db.query(Conversation).filter_by(id=conv_id).first()
+    if conv is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    # SQLite 默认不启用外键级联，显式删除消息保证两种数据库行为一致
+    db.query(Message).filter(Message.conversation_id == conv_id).delete()
+    db.delete(conv)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("")
+def clear_conversations(db=Depends(get_db), user=Depends(get_current_user)):
+    ids = [c.id for c in db.query(Conversation).all()]
+    if ids:
+        db.query(Message).filter(Message.conversation_id.in_(ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Conversation).filter(Conversation.id.in_(ids)).delete(
+            synchronize_session=False
+        )
+        db.commit()
+    return {"ok": True, "deleted": len(ids)}
+
+
 @router.get("/{conv_id}/messages")
 def get_messages(conv_id: str, db=Depends(get_db), user=Depends(get_current_user)):
     conv = db.query(Conversation).filter_by(id=conv_id).first()
