@@ -35,6 +35,17 @@ def create_app() -> FastAPI:
     def health():
         return {"status": "ok"}
 
+    @app.get("/")
+    def root():
+        """根路径友好提示：这里是 API 服务，页面在前端端口。"""
+        return {
+            "app": "DataPilot API",
+            "hint": "这里是后端 API，没有网页。请打开前端界面：",
+            "frontend_dev": "http://localhost:5173  (npm run dev)",
+            "frontend_docker": "http://localhost:8080  (docker compose up)",
+            "api_docs": "/docs",
+        }
+
     @app.on_event("startup")
     def startup():
         _init_storage()
